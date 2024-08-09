@@ -33,8 +33,9 @@ import (
 	"github.com/homeport/dyff/pkg/dyff"
 	"github.com/lucasb-eyer/go-colorful"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/errors"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/yaml"
 
 	"github.com/fluxcd/cli-utils/pkg/kstatus/polling"
@@ -57,6 +58,27 @@ func (b *Builder) Manager() (*ssa.ResourceManager, error) {
 }
 
 func (b *Builder) Diff() (string, bool, error) {
+	err := b.startSpinner()
+	if err != nil {
+		return "", false, err
+	}
+
+	output, createdOrDrifted, diffErr := b.diff()
+
+	err = b.stopSpinner()
+	if err != nil {
+		return "", false, err
+	}
+
+	return output, createdOrDrifted, diffErr
+}
+
+func (b *Builder) diff() (string, bool, error) {
+	gitRepository := map[string]string{
+		"flux-system": "/Users/bkreitch/git/flux-system",
+		"flux-gitops": "/Users/bkreitch/git/flux-gitops",
+	}
+
 	output := strings.Builder{}
 	createdOrDrifted := false
 	objects, err := b.Build()
@@ -127,6 +149,56 @@ func (b *Builder) Diff() (string, bool, error) {
 		}
 
 		addObjectsToInventory(newInventory, change)
+
+		if b.recursive && isKustomization(obj) && change.Action != ssa.CreatedAction {
+			kustomization, err := toKustomization(obj)
+			if err != nil {
+				return "", createdOrDrifted, err
+			}
+
+			if kustomizationsDiffer(kustomization, b.kustomization) {
+				if b.spinner != nil {
+					b.spinner.Message(fmt.Sprintf("running dry-run in %s", kustomization.Name))
+				}
+
+				if kustomization.Spec.SourceRef.Kind != "GitRepository" {
+					panic("only GitRepository is supported")
+				}
+				basePath := gitRepository[kustomization.Spec.SourceRef.Name]
+				resourcesPath := filepath.Join(basePath, kustomization.Spec.Path)
+
+				subBuilder, err := NewBuilder(kustomization.Name, resourcesPath,
+					// use same client and spinner
+					withClientConfigFrom(b),
+					withSpinnerFrom(b),
+					WithTimeout(b.timeout),
+					WithKustomizationFile(b.kustomizationFile),
+					WithIgnore(b.ignore),
+					WithStrictSubstitute(b.strictSubst),
+					WithRecursive(b.recursive),
+					WithNamespace(kustomization.Namespace),
+				)
+
+				if err != nil {
+					fmt.Println(err)
+					panic("cannot create subbuilder")
+				}
+
+				subOutput, subCreatedOrDrifted, subErr := subBuilder.diff()
+				if subErr != nil {
+					diffErrs = append(diffErrs, subErr)
+				}
+				if subCreatedOrDrifted {
+					createdOrDrifted = true
+					output.WriteString(bunt.Sprint(fmt.Sprintf("► %s changed\n", ssautil.FmtUnstructured(obj))))
+					output.WriteString(subOutput)
+				}
+
+				if b.spinner != nil {
+					b.spinner.Message("running dry-run")
+				}
+			}
+		}
 	}
 
 	if b.spinner != nil {
@@ -149,12 +221,28 @@ func (b *Builder) Diff() (string, bool, error) {
 		}
 	}
 
-	err = b.stopSpinner()
-	if err != nil {
-		return "", createdOrDrifted, err
-	}
+	return output.String(), createdOrDrifted, kerrors.Reduce(kerrors.Flatten(kerrors.NewAggregate(diffErrs)))
+}
 
-	return output.String(), createdOrDrifted, errors.Reduce(errors.Flatten(errors.NewAggregate(diffErrs)))
+func isKustomization(object *unstructured.Unstructured) bool {
+	return object.GetKind() == "Kustomization" && strings.HasPrefix(object.GetAPIVersion(), controllerGroup)
+}
+
+func toKustomization(object *unstructured.Unstructured) (*kustomizev1.Kustomization, error) {
+	kustomization := &kustomizev1.Kustomization{}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert to unstructured")
+	}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj, kustomization)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert to kustomization")
+	}
+	return kustomization, nil
+}
+
+func kustomizationsDiffer(k1 *kustomizev1.Kustomization, k2 *kustomizev1.Kustomization) bool {
+	return k1.Name != k2.Name || k1.Namespace != k2.Namespace
 }
 
 func writeYamls(liveObject, mergedObject *unstructured.Unstructured) (string, string, string, error) {

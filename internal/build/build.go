@@ -81,6 +81,7 @@ type Builder struct {
 	spinner       *yacspin.Spinner
 	dryRun        bool
 	strictSubst   bool
+	recursive     bool
 }
 
 // BuilderOptionFunc is a function that configures a Builder
@@ -171,6 +172,29 @@ func WithStrictSubstitute(strictSubstitute bool) BuilderOptionFunc {
 func WithIgnore(ignore []string) BuilderOptionFunc {
 	return func(b *Builder) error {
 		b.ignore = ignore
+		return nil
+	}
+}
+
+// WithRecursive sets the strict recurvice flag
+func WithRecursive(recursive bool) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.recursive = recursive
+		return nil
+	}
+}
+
+func withClientConfigFrom(in *Builder) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.client = in.client
+		b.restMapper = in.restMapper
+		return nil
+	}
+}
+
+func withSpinnerFrom(in *Builder) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.spinner = in.spinner
 		return nil
 	}
 }

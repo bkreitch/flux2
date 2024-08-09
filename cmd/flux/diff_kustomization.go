@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/spf13/cobra"
 
 	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
@@ -55,6 +56,9 @@ type diffKsFlags struct {
 	ignorePaths       []string
 	progressBar       bool
 	strictSubst       bool
+	recursive         bool
+	gitRepositories   map[string]string
+	ociRepositories   map[string]string
 }
 
 var diffKsArgs diffKsFlags
@@ -66,6 +70,9 @@ func init() {
 	diffKsCmd.Flags().StringVar(&diffKsArgs.kustomizationFile, "kustomization-file", "", "Path to the Flux Kustomization YAML file.")
 	diffKsCmd.Flags().BoolVar(&diffKsArgs.strictSubst, "strict-substitute", false,
 		"When enabled, the post build substitutions will fail if a var without a default value is declared in files but is missing from the input vars.")
+	diffKsCmd.Flags().BoolVarP(&diffKsArgs.recursive, "recursive", "r", false, "recurse into kustomizations")
+	diffKsCmd.Flags().StringToStringVar(&diffKsArgs.gitRepositories, "git", nil, "Git repositories local paths")
+	diffKsCmd.Flags().StringToStringVar(&diffKsArgs.ociRepositories, "oci", nil, "OCI repositories local paths")
 	diffCmd.AddCommand(diffKsCmd)
 }
 
@@ -89,10 +96,13 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	spew.Dump(diffKsArgs.gitRepositories)
+
 	var (
 		builder *build.Builder
 		err     error
 	)
+
 	if diffKsArgs.progressBar {
 		builder, err = build.NewBuilder(name, diffKsArgs.path,
 			build.WithClientConfig(kubeconfigArgs, kubeclientOptions),
@@ -101,6 +111,9 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 			build.WithProgressBar(),
 			build.WithIgnore(diffKsArgs.ignorePaths),
 			build.WithStrictSubstitute(diffKsArgs.strictSubst),
+			build.WithRecursive(diffKsArgs.recursive),
+			// build.WithGitRepositories(diffKsArgs.gitRepositories),
+			// build.WithOCIRepositories(diffKsArgs.ociRepositories),
 		)
 	} else {
 		builder, err = build.NewBuilder(name, diffKsArgs.path,
@@ -109,6 +122,7 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 			build.WithKustomizationFile(diffKsArgs.kustomizationFile),
 			build.WithIgnore(diffKsArgs.ignorePaths),
 			build.WithStrictSubstitute(diffKsArgs.strictSubst),
+			build.WithRecursive(diffKsArgs.recursive),
 		)
 	}
 
