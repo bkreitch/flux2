@@ -33,6 +33,7 @@ import (
 	"github.com/homeport/dyff/pkg/dyff"
 	"github.com/lucasb-eyer/go-colorful"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/yaml"
@@ -57,6 +58,22 @@ func (b *Builder) Manager() (*ssa.ResourceManager, error) {
 }
 
 func (b *Builder) Diff() (string, bool, error) {
+	err := b.StartSpinner()
+	if err != nil {
+		return "", false, err
+	}
+
+	output, createdOrDrifted, diffErr := b.diff()
+
+	err = b.StopSpinner()
+	if err != nil {
+		return "", false, err
+	}
+
+	return output, createdOrDrifted, diffErr
+}
+
+func (b *Builder) diff() (string, bool, error) {
 	output := strings.Builder{}
 	createdOrDrifted := false
 	objects, err := b.Build()
@@ -76,11 +93,6 @@ func (b *Builder) Diff() (string, bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), b.timeout)
 	defer cancel()
-
-	err = b.startSpinner()
-	if err != nil {
-		return "", false, err
-	}
 
 	var diffErrs []error
 	// create an inventory of objects to be reconciled
@@ -127,6 +139,30 @@ func (b *Builder) Diff() (string, bool, error) {
 		}
 
 		addObjectsToInventory(newInventory, change)
+
+		if b.recursive && isKustomization(obj) && change.Action != ssa.CreatedAction {
+			kustomization, err := toKustomization(obj)
+			if err != nil {
+				return "", createdOrDrifted, err
+			}
+
+			if !kustomizationsEqual(kustomization, b.kustomization) {
+				subOutput, subCreatedOrDrifted, err := b.kustomizationDiff(kustomization)
+				if err != nil {
+					diffErrs = append(diffErrs, err)
+				}
+				if subCreatedOrDrifted {
+					createdOrDrifted = true
+					output.WriteString(bunt.Sprint(fmt.Sprintf("📁 %s changed\n", ssautil.FmtUnstructured(obj))))
+					output.WriteString(subOutput)
+				}
+
+				// finished with Kustomization diff
+				if b.spinner != nil {
+					b.spinner.Message(spinnerDryRunMessage)
+				}
+			}
+		}
 	}
 
 	if b.spinner != nil {
@@ -149,12 +185,63 @@ func (b *Builder) Diff() (string, bool, error) {
 		}
 	}
 
-	err = b.stopSpinner()
+	return output.String(), createdOrDrifted, errors.Reduce(errors.Flatten(errors.NewAggregate(diffErrs)))
+}
+
+func isKustomization(object *unstructured.Unstructured) bool {
+	return object.GetKind() == "Kustomization" && strings.HasPrefix(object.GetAPIVersion(), controllerGroup)
+}
+
+func toKustomization(object *unstructured.Unstructured) (*kustomizev1.Kustomization, error) {
+	kustomization := &kustomizev1.Kustomization{}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
 	if err != nil {
-		return "", createdOrDrifted, err
+		return nil, fmt.Errorf("failed to convert to unstructured: %w", err)
+	}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj, kustomization)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert to kustomization: %w", err)
+	}
+	return kustomization, nil
+}
+
+func kustomizationsEqual(k1 *kustomizev1.Kustomization, k2 *kustomizev1.Kustomization) bool {
+	return k1.Name == k2.Name && k1.Namespace == k2.Namespace
+}
+
+func (b *Builder) kustomizationDiff(kustomization *kustomizev1.Kustomization) (string, bool, error) {
+	if b.spinner != nil {
+		b.spinner.Message(fmt.Sprintf("%s in %s", spinnerDryRunMessage, kustomization.Name))
 	}
 
-	return output.String(), createdOrDrifted, errors.Reduce(errors.Flatten(errors.NewAggregate(diffErrs)))
+	sourceRef := kustomization.Spec.SourceRef.DeepCopy()
+	if sourceRef.Namespace == "" {
+		sourceRef.Namespace = kustomization.Namespace
+	}
+
+	sourceKey := sourceRef.String()
+	localPath, ok := b.localSources[sourceKey]
+	if !ok {
+		return "", false, fmt.Errorf("cannot get local path for %s of kustomization %s", sourceKey, kustomization.Name)
+	}
+
+	resourcesPath := filepath.Join(localPath, kustomization.Spec.Path)
+	subBuilder, err := NewBuilder(kustomization.Name, resourcesPath,
+		// use same client and spinner
+		withClientConfigFrom(b),
+		withSpinnerFrom(b),
+		WithTimeout(b.timeout),
+		WithIgnore(b.ignore),
+		WithStrictSubstitute(b.strictSubst),
+		WithRecursive(b.recursive),
+		WithLocalSources(b.localSources),
+		WithNamespace(kustomization.Namespace),
+	)
+	if err != nil {
+		return "", false, err
+	}
+
+	return subBuilder.diff()
 }
 
 func writeYamls(liveObject, mergedObject *unstructured.Unstructured) (string, string, string, error) {

@@ -51,13 +51,14 @@ import (
 )
 
 const (
-	controllerName      = "kustomize-controller"
-	controllerGroup     = "kustomize.toolkit.fluxcd.io"
-	mask                = "**SOPS**"
-	dockercfgSecretType = "kubernetes.io/dockerconfigjson"
-	typeField           = "type"
-	dataField           = "data"
-	stringDataField     = "stringData"
+	controllerName       = "kustomize-controller"
+	controllerGroup      = "kustomize.toolkit.fluxcd.io"
+	mask                 = "**SOPS**"
+	dockercfgSecretType  = "kubernetes.io/dockerconfigjson"
+	typeField            = "type"
+	dataField            = "data"
+	stringDataField      = "stringData"
+	spinnerDryRunMessage = "running dry-run"
 )
 
 var defaultTimeout = 80 * time.Second
@@ -81,6 +82,8 @@ type Builder struct {
 	spinner       *yacspin.Spinner
 	dryRun        bool
 	strictSubst   bool
+	recursive     bool
+	localSources  map[string]string
 }
 
 // BuilderOptionFunc is a function that configures a Builder
@@ -110,7 +113,7 @@ func WithProgressBar() BuilderOptionFunc {
 			CharSet:         yacspin.CharSets[59],
 			Suffix:          "Kustomization diffing...",
 			SuffixAutoColon: true,
-			Message:         "running dry-run",
+			Message:         spinnerDryRunMessage,
 			StopCharacter:   "✓",
 			StopColors:      []string{"fgGreen"},
 		}
@@ -171,6 +174,37 @@ func WithStrictSubstitute(strictSubstitute bool) BuilderOptionFunc {
 func WithIgnore(ignore []string) BuilderOptionFunc {
 	return func(b *Builder) error {
 		b.ignore = ignore
+		return nil
+	}
+}
+
+// WithRecursive sets the recurvice flag
+func WithRecursive(recursive bool) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.recursive = recursive
+		return nil
+	}
+}
+
+// WithLocalSources sets the localSources field
+func WithLocalSources(localSources map[string]string) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.localSources = localSources
+		return nil
+	}
+}
+
+func withClientConfigFrom(in *Builder) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.client = in.client
+		b.restMapper = in.restMapper
+		return nil
+	}
+}
+
+func withSpinnerFrom(in *Builder) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.spinner = in.spinner
 		return nil
 	}
 }
@@ -583,12 +617,7 @@ func (b *Builder) Cancel() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	err := b.stopSpinner()
-	if err != nil {
-		return err
-	}
-
-	err = kustomize.CleanDirectory(b.resourcesPath, b.action)
+	err := kustomize.CleanDirectory(b.resourcesPath, b.action)
 	if err != nil {
 		return err
 	}
@@ -596,7 +625,7 @@ func (b *Builder) Cancel() error {
 	return nil
 }
 
-func (b *Builder) startSpinner() error {
+func (b *Builder) StartSpinner() error {
 	if b.spinner == nil {
 		return nil
 	}
@@ -609,7 +638,7 @@ func (b *Builder) startSpinner() error {
 	return nil
 }
 
-func (b *Builder) stopSpinner() error {
+func (b *Builder) StopSpinner() error {
 	if b.spinner == nil {
 		return nil
 	}
