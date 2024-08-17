@@ -33,7 +33,6 @@ import (
 	"github.com/homeport/dyff/pkg/dyff"
 	"github.com/lucasb-eyer/go-colorful"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/yaml"
@@ -141,13 +140,13 @@ func (b *Builder) diff() (string, bool, error) {
 		addObjectsToInventory(newInventory, change)
 
 		if b.recursive && isKustomization(obj) && change.Action != ssa.CreatedAction {
-			kustomization, err := toKustomization(obj)
+			k, err := toKustomization(obj)
 			if err != nil {
 				return "", createdOrDrifted, err
 			}
 
-			if !kustomizationsEqual(kustomization, b.kustomization) {
-				subOutput, subCreatedOrDrifted, err := b.kustomizationDiff(kustomization)
+			if !kustomizationsEqual(k, b.kustomization) {
+				subOutput, subCreatedOrDrifted, err := b.kustomizationDiff(k)
 				if err != nil {
 					diffErrs = append(diffErrs, err)
 				}
@@ -188,27 +187,6 @@ func (b *Builder) diff() (string, bool, error) {
 	return output.String(), createdOrDrifted, errors.Reduce(errors.Flatten(errors.NewAggregate(diffErrs)))
 }
 
-func isKustomization(object *unstructured.Unstructured) bool {
-	return object.GetKind() == "Kustomization" && strings.HasPrefix(object.GetAPIVersion(), controllerGroup)
-}
-
-func toKustomization(object *unstructured.Unstructured) (*kustomizev1.Kustomization, error) {
-	kustomization := &kustomizev1.Kustomization{}
-	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert to unstructured: %w", err)
-	}
-	err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj, kustomization)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert to kustomization: %w", err)
-	}
-	return kustomization, nil
-}
-
-func kustomizationsEqual(k1 *kustomizev1.Kustomization, k2 *kustomizev1.Kustomization) bool {
-	return k1.Name == k2.Name && k1.Namespace == k2.Namespace
-}
-
 func (b *Builder) kustomizationDiff(kustomization *kustomizev1.Kustomization) (string, bool, error) {
 	if b.spinner != nil {
 		b.spinner.Message(fmt.Sprintf("%s in %s", spinnerDryRunMessage, kustomization.Name))
@@ -231,11 +209,12 @@ func (b *Builder) kustomizationDiff(kustomization *kustomizev1.Kustomization) (s
 		withClientConfigFrom(b),
 		withSpinnerFrom(b),
 		WithTimeout(b.timeout),
+		WithNamespace(kustomization.Namespace),
 		WithIgnore(b.ignore),
 		WithStrictSubstitute(b.strictSubst),
 		WithRecursive(b.recursive),
 		WithLocalSources(b.localSources),
-		WithNamespace(kustomization.Namespace),
+		WithSingleKustomization(),
 	)
 	if err != nil {
 		return "", false, err

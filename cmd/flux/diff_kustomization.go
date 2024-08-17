@@ -112,6 +112,7 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 			build.WithStrictSubstitute(diffKsArgs.strictSubst),
 			build.WithRecursive(diffKsArgs.recursive),
 			build.WithLocalSources(diffKsArgs.localSources),
+			build.WithSingleKustomization(),
 		)
 	} else {
 		builder, err = build.NewBuilder(name, diffKsArgs.path,
@@ -122,6 +123,7 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 			build.WithStrictSubstitute(diffKsArgs.strictSubst),
 			build.WithRecursive(diffKsArgs.recursive),
 			build.WithLocalSources(diffKsArgs.localSources),
+			build.WithSingleKustomization(),
 		)
 	}
 
