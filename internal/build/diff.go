@@ -119,13 +119,15 @@ func (b *Builder) diff() (string, bool, error) {
 			diffSopsSecret(obj, liveObject, mergedObject, change)
 		}
 
+		objIcon := icon(obj)
+
 		if change.Action == ssa.CreatedAction {
-			output.WriteString(writeString(fmt.Sprintf("► %s created\n", change.Subject), bunt.Green))
+			output.WriteString(writeString(fmt.Sprintf("%s %s created\n", objIcon, change.Subject), bunt.Green))
 			createdOrDrifted = true
 		}
 
 		if change.Action == ssa.ConfiguredAction {
-			output.WriteString(bunt.Sprint(fmt.Sprintf("► %s drifted\n", change.Subject)))
+			output.WriteString(bunt.Sprint(fmt.Sprintf("%s %s drifted\n", objIcon, change.Subject)))
 			liveFile, mergedFile, tmpDir, err := writeYamls(liveObject, mergedObject)
 			if err != nil {
 				return "", createdOrDrifted, err
@@ -159,7 +161,7 @@ func (b *Builder) diff() (string, bool, error) {
 					}
 					if subCreatedOrDrifted {
 						createdOrDrifted = true
-						output.WriteString(bunt.Sprint(fmt.Sprintf("📁 %s changed\n", ssautil.FmtUnstructured(obj))))
+						output.WriteString(bunt.Sprint(fmt.Sprintf("%s %s drifted\n", objIcon, ssautil.FmtUnstructured(obj))))
 						output.WriteString(subOutput)
 					}
 				}
@@ -187,7 +189,8 @@ func (b *Builder) diff() (string, bool, error) {
 				createdOrDrifted = true
 			}
 			for _, object := range staleObjects {
-				output.WriteString(writeString(fmt.Sprintf("► %s deleted\n", ssautil.FmtUnstructured(object)), bunt.OrangeRed))
+				objectIcon := icon(object)
+				output.WriteString(writeString(fmt.Sprintf("%s %s deleted\n", objectIcon, ssautil.FmtUnstructured(object)), bunt.OrangeRed))
 			}
 		}
 	}
@@ -406,4 +409,12 @@ func addObjectsToInventory(inv *kustomizev1.ResourceInventory, entry *ssa.Change
 	})
 
 	return nil
+}
+
+func icon(object *unstructured.Unstructured) string {
+	if isKustomization(object) {
+		return ("📁")
+	}
+
+	return ("►")
 }
