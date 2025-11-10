@@ -77,15 +77,16 @@ type Builder struct {
 	kustomizationFile string
 	ignore            []string
 	// mu is used to synchronize access to the kustomization file
-	mu            sync.Mutex
-	action        kustomize.Action
-	kustomization *kustomizev1.Kustomization
-	timeout       time.Duration
-	spinner       *yacspin.Spinner
-	dryRun        bool
-	strictSubst   bool
-	recursive     bool
-	localSources  map[string]string
+	mu                 sync.Mutex
+	action             kustomize.Action
+	kustomization      *kustomizev1.Kustomization
+	timeout            time.Duration
+	spinner            *yacspin.Spinner
+	dryRun             bool
+	strictSubst        bool
+	recursive          bool
+	localSources       map[string]string
+	detectReplacements bool
 	// diff needs to handle kustomizations one by one
 	singleKustomization bool
 }
@@ -194,6 +195,14 @@ func WithRecursive(recursive bool) BuilderOptionFunc {
 func WithLocalSources(localSources map[string]string) BuilderOptionFunc {
 	return func(b *Builder) error {
 		b.localSources = localSources
+		return nil
+	}
+}
+
+// WithDetectReplacements enables detection of ConfigMap/Secret replacements
+func WithDetectReplacements(detectReplacements bool) BuilderOptionFunc {
+	return func(b *Builder) error {
+		b.detectReplacements = detectReplacements
 		return nil
 	}
 }

@@ -55,13 +55,14 @@ flux diff kustomization my-app --path ./path/to/local/manifests \
 }
 
 type diffKsFlags struct {
-	kustomizationFile string
-	path              string
-	ignorePaths       []string
-	progressBar       bool
-	strictSubst       bool
-	recursive         bool
-	localSources      map[string]string
+	kustomizationFile  string
+	path               string
+	ignorePaths        []string
+	progressBar        bool
+	strictSubst        bool
+	recursive          bool
+	localSources       map[string]string
+	detectReplacements bool
 }
 
 var diffKsArgs diffKsFlags
@@ -75,6 +76,7 @@ func init() {
 		"When enabled, the post build substitutions will fail if a var without a default value is declared in files but is missing from the input vars.")
 	diffKsCmd.Flags().BoolVarP(&diffKsArgs.recursive, "recursive", "r", false, "Recursively diff Kustomizations")
 	diffKsCmd.Flags().StringToStringVar(&diffKsArgs.localSources, "local-sources", nil, "Comma-separated list of repositories in format: Kind/namespace/name=path")
+	diffKsCmd.Flags().BoolVar(&diffKsArgs.detectReplacements, "detect-replacements", false, "Detect ConfigMap/Secret replacements with hash suffix changes")
 	diffCmd.AddCommand(diffKsCmd)
 }
 
@@ -112,6 +114,7 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 			build.WithStrictSubstitute(diffKsArgs.strictSubst),
 			build.WithRecursive(diffKsArgs.recursive),
 			build.WithLocalSources(diffKsArgs.localSources),
+			build.WithDetectReplacements(diffKsArgs.detectReplacements),
 			build.WithSingleKustomization(),
 		)
 	} else {
@@ -123,6 +126,7 @@ func diffKsCmdRun(cmd *cobra.Command, args []string) error {
 			build.WithStrictSubstitute(diffKsArgs.strictSubst),
 			build.WithRecursive(diffKsArgs.recursive),
 			build.WithLocalSources(diffKsArgs.localSources),
+			build.WithDetectReplacements(diffKsArgs.detectReplacements),
 			build.WithSingleKustomization(),
 		)
 	}

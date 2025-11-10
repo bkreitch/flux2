@@ -104,6 +104,12 @@ func TestDiffKustomization(t *testing.T) {
 			objectFile: "./testdata/diff-kustomization/my-app.yaml",
 			assert:     assertGoldenFile("./testdata/diff-kustomization/diff-with-recursive.golden"),
 		},
+		{
+			name:       "diff with replacement detection",
+			args:       "diff kustomization podinfo --path ./testdata/build-kustomization/podinfo --progress-bar=false --detect-replacements --kustomization-file ./testdata/diff-kustomization/flux-kustomization-with-existing-secret.yaml",
+			objectFile: "./testdata/diff-kustomization/existing-secret.yaml",
+			assert:     assertGoldenFile("./testdata/diff-kustomization/diff-with-replacement.golden"),
+		},
 	}
 
 	tmpl := map[string]string{

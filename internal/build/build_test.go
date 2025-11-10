@@ -611,3 +611,179 @@ func Test_kustomizationPath(t *testing.T) {
 		})
 	}
 }
+
+func Test_baseName(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "name with hash suffix",
+			input:    "nginx-config-abc1234567",
+			expected: "nginx-config",
+		},
+		{
+			name:     "name without hash suffix",
+			input:    "nginx-config",
+			expected: "nginx-config",
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			result := baseName(tt.input)
+			if result != tt.expected {
+				t.Errorf("baseName(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func Test_buildReplacements(t *testing.T) {
+	testCases := []struct {
+		name        string
+		objects     []*unstructured.Unstructured
+		inventory   *kustomizev1.ResourceInventory
+		wantErr     bool
+		errContains string
+		wantCount   int
+	}{
+		{
+			name: "ConfigMap replacement detected",
+			inventory: &kustomizev1.ResourceInventory{
+				Entries: []kustomizev1.ResourceRef{
+					{
+						ID:      "default_nginx-config-abc1234567__ConfigMap",
+						Version: "v1",
+					},
+				},
+			},
+			objects: []*unstructured.Unstructured{
+				{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]interface{}{
+							"name":      "nginx-config-def4567890",
+							"namespace": "default",
+						},
+					},
+				},
+			},
+			wantCount: 1,
+		},
+		{
+			name: "no replacement",
+			inventory: &kustomizev1.ResourceInventory{
+				Entries: []kustomizev1.ResourceRef{
+					{
+						ID:      "default_nginx-config-abc1234567__ConfigMap",
+						Version: "v1",
+					},
+				},
+			},
+			objects: []*unstructured.Unstructured{
+				{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]interface{}{
+							"name":      "nginx-config-abc1234567",
+							"namespace": "default",
+						},
+					},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "multiple old resources with same basename error",
+			objects: []*unstructured.Unstructured{
+				{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]interface{}{
+							"name":      "nginx-config-xyz0123456",
+							"namespace": "default",
+						},
+					},
+				},
+			},
+			inventory: &kustomizev1.ResourceInventory{
+				Entries: []kustomizev1.ResourceRef{
+					{
+						ID:      "default_nginx-config-def4567890__ConfigMap",
+						Version: "v1",
+					},
+					{
+						ID:      "default_nginx-config-ghi7890123__ConfigMap",
+						Version: "v1",
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "multiple old resources with basename",
+		},
+		{
+			name: "multiple new resources with same basename error",
+			inventory: &kustomizev1.ResourceInventory{
+				Entries: []kustomizev1.ResourceRef{
+					{
+						ID:      "default_nginx-config-ghi7890123__ConfigMap",
+						Version: "v1",
+					},
+				},
+			},
+			objects: []*unstructured.Unstructured{
+				{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]interface{}{
+							"name":      "nginx-config-ghi7890123",
+							"namespace": "default",
+						},
+					},
+				},
+				{
+					Object: map[string]interface{}{
+						"apiVersion": "v1",
+						"kind":       "ConfigMap",
+						"metadata": map[string]interface{}{
+							"name":      "nginx-config-abc1234567",
+							"namespace": "default",
+						},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "multiple new resources with basename",
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			replacements, err := buildReplacements(tt.objects, tt.inventory)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error to contain %q, got %q", tt.errContains, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(replacements) != tt.wantCount {
+				t.Errorf("expected %d replacements, got %d", tt.wantCount, len(replacements))
+			}
+		})
+	}
+}

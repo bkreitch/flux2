@@ -64,13 +64,14 @@ flux build kustomization my-app --path ./path/to/local/manifests \
 }
 
 type buildKsFlags struct {
-	kustomizationFile string
-	path              string
-	ignorePaths       []string
-	dryRun            bool
-	strictSubst       bool
-	recursive         bool
-	localSources      map[string]string
+	kustomizationFile  string
+	path               string
+	ignorePaths        []string
+	dryRun             bool
+	strictSubst        bool
+	recursive          bool
+	localSources       map[string]string
+	detectReplacements bool
 }
 
 var buildKsArgs buildKsFlags
@@ -84,6 +85,7 @@ func init() {
 		"When enabled, the post build substitutions will fail if a var without a default value is declared in files but is missing from the input vars.")
 	buildKsCmd.Flags().BoolVarP(&buildKsArgs.recursive, "recursive", "r", false, "Recursively build Kustomizations")
 	buildKsCmd.Flags().StringToStringVar(&buildKsArgs.localSources, "local-sources", nil, "Comma-separated list of repositories in format: Kind/namespace/name=path")
+	buildKsCmd.Flags().BoolVar(&buildKsArgs.detectReplacements, "detect-replacements", false, "Detect ConfigMap/Secret replacements with hash suffix changes")
 	buildCmd.AddCommand(buildKsCmd)
 }
 
@@ -122,6 +124,7 @@ func buildKsCmdRun(cmd *cobra.Command, args []string) (err error) {
 			build.WithStrictSubstitute(buildKsArgs.strictSubst),
 			build.WithRecursive(buildKsArgs.recursive),
 			build.WithLocalSources(buildKsArgs.localSources),
+			build.WithDetectReplacements(buildKsArgs.detectReplacements),
 		)
 	} else {
 		builder, err = build.NewBuilder(name, buildKsArgs.path,
@@ -132,6 +135,7 @@ func buildKsCmdRun(cmd *cobra.Command, args []string) (err error) {
 			build.WithStrictSubstitute(buildKsArgs.strictSubst),
 			build.WithRecursive(buildKsArgs.recursive),
 			build.WithLocalSources(buildKsArgs.localSources),
+			build.WithDetectReplacements(buildKsArgs.detectReplacements),
 		)
 	}
 
